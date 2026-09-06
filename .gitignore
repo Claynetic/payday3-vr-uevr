@@ -1,0 +1,9 @@
+# UEVR is downloaded by the installer, never committed (all rights reserved, praydog)
+PAYDAY3-VR/UEVR/
+# local test / backup artefacts
+*.bak*
+*.log
+log*.txt
+profile-test/
+nexus-upload/
+nexus-media/
