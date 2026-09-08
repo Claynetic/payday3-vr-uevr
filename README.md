@@ -67,9 +67,9 @@ No build step. The release zips are the `PAYDAY3-VR/` folder as-is (`PAYDAY3-VR-
 ## Credits and disclosure
 
 - [UEVR](https://github.com/praydog/UEVR) by praydog — © praydog, all rights reserved. Not redistributed; fetched from the official releases by the installer.
-- Investigation, testing and profile: **damien3mf**. The Lua script and the installer/launcher scripts were written with Claude (Anthropic) during that investigation, which is why the Nexus page carries the *AI-Generated Content* tag. Everything shipped was tested over full heists on real hardware.
+- Investigation, testing and profile: **damien3mf**. The Lua script and the installer/launcher scripts were written with Claude during that investigation. All was tested over full heists on highly optimized hardware.
 - The Flat2VR community and [uevr-profiles.com](https://uevr-profiles.com) for the profile conventions.
-- PAYDAY 3 is © Starbreeze Studios. This repository contains no game assets.
+- PAYDAY 3 is © Starbreeze Studios. All Rights Reserved.
 
 ## License
 
