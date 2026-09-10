@@ -48,16 +48,17 @@ Play
 
 Tuning
 ------
- * Weapon looks too big / too close: Insert > Camera tab > Forward offset -10 to -20, Up offset +2 to +5.
-   UEVR saves this to cameras.txt automatically.
+ * Weapon position: Insert > LuaLoader > Script UI has Pull-back, Height, Pitch and Yaw sliders (saved
+   automatically; defaults 9.8 cm back, 4.2 cm down). Height/pitch/yaw return to 0 while you aim.
  * Performance: Insert > OpenXR > Resolution scale (profile ships at 0.90). Native Stereo + Native Stereo
    Fix is the tested render method; leave it unless you have a reason.
- * Arms or gun clipping into the camera during reloads: Insert > Near Clip Plane > Enable (value 0.01).
+ * Sights or arms clipping when aiming or reloading: the profile enables Near Clip Plane at 1 cm; try 0.5
+   in Insert > Near Clip Plane if you still see it.
 
 Known limitations
 -----------------
- * The weapon is drawn at true scale in the world instead of Starbreeze's narrow 55 degree "viewmodel"
-   FOV, so it sits bigger and closer than on a flat screen. Use the camera offsets above to taste.
+ * The weapon is drawn at its true position instead of through Starbreeze's narrow 55 degree "viewmodel"
+   FOV, which magnifies it about 2x on a flat screen; the script pulls it back toward you to compensate.
  * No depth-of-field on the weapon (that effect lived in TopPass).
  * Tested on the PAYDAY 3 build above with UEVR nightly-01143. A game update can change component
    names or the TopPass property; if arms disappear after a patch, check the UEVR log
@@ -89,4 +90,7 @@ Credits and disclosure
 
 Version
 -------
+ 2.0  -  profile script v12: adjustable weapon position (pull-back/height/pitch/yaw in Script UI), Near
+         Clip Plane at 1 cm, tools appear at spawn, lighter per-second scan. The installer no longer switches
+         to an unverified UEVR build on its own.
  1.0  -  first release. Profile script v8 (SetRenderInTopPass fix), UEVR nightly-01143, PAYDAY 3 3.8.

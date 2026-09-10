@@ -1,0 +1,135 @@
+# Builds the two release zips on every push / PR (artifact "release-zips") after lint-checking the Lua and
+# PowerShell. On a v* tag it publishes both zips as a GitHub release (what players download), then - when the
+# Nexus secret/variables below are set - uploads them to Nexus Mods (https://www.nexusmods.com/payday3/mods/293)
+# as new versions of the existing files. Without them the Nexus step is skipped with a warning.
+#
+# One-time setup - repo Settings > Secrets and variables > Actions:
+#   secret   NEXUSMODS_API_KEY      personal key from https://www.nexusmods.com/settings/api-keys
+#   variable NEXUS_MOD_ID           v3 mod id: the "id" field of GET https://api.nexusmods.com/v3/games/payday3/mods/293
+#   variable NEXUS_FILE_ID_MAIN     file id of the "PAYDAY3 VR" file (Files tab > API Info, or Manage Files > edit)
+#   variable NEXUS_FILE_ID_PROFILE  file id of the "PAYDAY3 UEVR Profile Only" file
+#
+# Release: add a "## <version> - <date>" section to CHANGELOG.md, commit, then
+#   git tag v<version> && git push origin v<version>
+name: release
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: v
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="dev-${GITHUB_SHA::7}"; fi
+          # Nexus accepts ^[a-zA-Z0-9.-]+$, max 50 characters
+          [[ "$v" =~ ^[A-Za-z0-9.-]{1,50}$ ]] || { echo "::error::version '$v' is not valid on Nexus (letters, digits, '.', '-'; max 50)"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Lint Lua and PowerShell
+        run: |
+          sudo apt-get install -y -qq lua5.4 > /dev/null
+          find PAYDAY3-VR -name '*.lua' -print0 | xargs -0 -n1 luac5.4 -p
+          pwsh -NoProfile -Command '
+            $bad = 0
+            Get-ChildItem PAYDAY3-VR -Recurse -Filter *.ps1 | ForEach-Object {
+              $errs = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs)
+              foreach ($e in $errs) { $bad++; Write-Host "::error file=$($_.FullName),line=$($e.Extent.StartLineNumber)::$($e.Message)" }
+            }
+            exit $bad'
+
+      - name: Changelog section
+        id: log
+        env:
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          # the lines under "## <version> ..." up to the next "## "
+          awk -v v="$V" '/^## /{ if (f) exit; if (index($0, "## " v " ") == 1 || $0 == "## " v) { f = 1; next } } f' CHANGELOG.md > notes.md
+          if [[ "$GITHUB_REF" == refs/tags/v* && ! -s notes.md ]]; then echo "::error::CHANGELOG.md has no '## $V' section"; exit 1; fi
+          { echo 'text<<__CHANGELOG__'; cat notes.md; echo '__CHANGELOG__'; } >> "$GITHUB_OUTPUT"
+
+      - name: Build zips
+        env:
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          mkdir dist
+          zip -qr "dist/PAYDAY3-VR-$V.zip" PAYDAY3-VR -x 'PAYDAY3-VR/UEVR/*'
+          (cd PAYDAY3-VR/profile && zip -qr "../../dist/PAYDAY3-UEVR-profile-only-$V.zip" PAYDAY3-Win64-Shipping)
+          for z in dist/*.zip; do
+            echo "== $z"; unzip -Z1 "$z"
+            # UEVR is (c) praydog, all rights reserved: a release must never carry its binaries
+            if unzip -Z1 "$z" | grep -iqE '\.(dll|exe|pdb)$'; then echo "::error::$z contains binaries"; exit 1; fi
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-zips
+          path: dist/*.zip
+
+      - name: GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          # re-runnable: a second run replaces the assets instead of failing on "release already exists"
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.zip --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.zip --title "PAYDAY 3 VR $V" --notes-file notes.md
+          fi
+
+      - name: Check Nexus configuration
+        id: nexus
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          HAS_KEY: ${{ secrets.NEXUSMODS_API_KEY != '' }}
+          MOD_ID: ${{ vars.NEXUS_MOD_ID }}
+          FILE_MAIN: ${{ vars.NEXUS_FILE_ID_MAIN }}
+          FILE_PROFILE: ${{ vars.NEXUS_FILE_ID_PROFILE }}
+        run: |
+          if [[ "$HAS_KEY" == true && -n "$MOD_ID" && -n "$FILE_MAIN" && -n "$FILE_PROFILE" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Nexus upload skipped - set the NEXUSMODS_API_KEY secret and the NEXUS_MOD_ID / NEXUS_FILE_ID_MAIN / NEXUS_FILE_ID_PROFILE variables (see the top of this file)"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Nexus - main file
+        if: startsWith(github.ref, 'refs/tags/v') && steps.nexus.outputs.ready == 'true'
+        uses: Nexus-Mods/upload-action@c96019556046053aa26044b44396cd38929daf23 # v1.0.0-beta.10
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ vars.NEXUS_FILE_ID_MAIN }}
+          filename: dist/PAYDAY3-VR-${{ steps.v.outputs.version }}.zip
+          display_name: PAYDAY3 VR ${{ steps.v.outputs.version }}
+          version: ${{ steps.v.outputs.version }}
+          category: main
+          description: Installer, launcher and UEVR profile. UEVR itself is downloaded from praydog's GitHub at install time (pinned nightly, SHA-256 verified).
+          archive_existing_version: true
+          update_mod_version: true
+          mod_id: ${{ vars.NEXUS_MOD_ID }}
+          changelog: ${{ steps.log.outputs.text }}
+
+      - name: Nexus - profile-only file
+        if: startsWith(github.ref, 'refs/tags/v') && steps.nexus.outputs.ready == 'true'
+        uses: Nexus-Mods/upload-action@c96019556046053aa26044b44396cd38929daf23 # v1.0.0-beta.10
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ vars.NEXUS_FILE_ID_PROFILE }}
+          filename: dist/PAYDAY3-UEVR-profile-only-${{ steps.v.outputs.version }}.zip
+          display_name: PAYDAY3 UEVR Profile Only ${{ steps.v.outputs.version }}
+          version: ${{ steps.v.outputs.version }}
+          category: miscellaneous
+          description: Just the UEVR profile, for people who already run UEVR (Import Config). Needs a UEVR nightly.
+          archive_existing_version: true

@@ -10,6 +10,7 @@ param(
     [string]$UevrZip    = "",        # use an already-downloaded UEVR.zip instead of downloading
     [switch]$SkipShortcut,
     [switch]$SkipProfile,
+    [switch]$AllowUnverified,        # if the pinned UEVR build is gone, accept the latest nightly without asking
     [switch]$NoPause
 )
 $ErrorActionPreference = 'Stop'
@@ -36,6 +37,14 @@ function Fail($m) { Write-Host "  [XX]  $m" -ForegroundColor Red; if (-not $NoPa
 function Sha($f) {
     $alg = [Security.Cryptography.SHA256]::Create(); $fs = [IO.File]::OpenRead($f)
     try { ([BitConverter]::ToString($alg.ComputeHash($fs))).Replace('-', '').ToLower() } finally { $fs.Dispose(); $alg.Dispose() }
+}
+# Called only when the pinned UEVR build can no longer be downloaded. Decides whether to fall back to the
+# LATEST nightly, which is NOT the build this bundle was tested with and cannot be hash-verified (and whose
+# injector Launch.ps1 later starts elevated). Return $true to continue with it, $false to stop the install.
+# Available: $AllowUnverified (switch), $NoPause (set by scripted/unattended runs, where Read-Host would block).
+function Confirm-UnverifiedUevr {
+    # Explicit opt-in only: continue with the unverified latest nightly only when -AllowUnverified was passed.
+    return [bool]$AllowUnverified
 }
 
 try {
@@ -68,7 +77,10 @@ if ((Test-Path $backend) -and ((Sha $backend) -eq $BackendSha)) {
             Invoke-WebRequest -Uri $UevrUrl -OutFile $zip -UseBasicParsing
         } catch {
             Warn "Pinned build could not be downloaded ($($_.Exception.Message))."
-            Warn 'Nightly builds are sometimes pruned. Trying the LATEST nightly instead - it is NOT the build this bundle was tested with.'
+            Warn 'Nightly builds are sometimes pruned. The LATEST nightly could be used instead, but it is NOT the build this bundle was tested with and cannot be hash-verified.'
+            if (-not (Confirm-UnverifiedUevr)) {
+                Fail "Stopped without installing an unverified UEVR. Download UEVR.zip for $UevrTag from https://github.com/praydog/UEVR-nightly/releases and run:  Install.ps1 -UevrZip <path to UEVR.zip>   (or re-run with -AllowUnverified to accept the latest nightly)"
+            }
             try {
                 $rel = Invoke-RestMethod -Uri $LatestApi -UseBasicParsing -Headers @{ 'User-Agent' = 'PAYDAY3-VR-installer' }
                 $asset = $rel.assets | Where-Object { $_.name -eq 'UEVR.zip' } | Select-Object -First 1
